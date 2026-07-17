@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,14 +20,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.ui.CoupleSpaceViewModel
 
 @Composable
@@ -104,20 +103,18 @@ fun LoginScreen(viewModel: CoupleSpaceViewModel, onLoginSuccess: () -> Unit) {
                     .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = "https://lh3.googleusercontent.com/aida-public/AB6AXuD9E63ddjs34SQJGOoN2i_Hm3mCKA4FHdKmt4ETnB5-PrCrCexsLSGRR7tnhVCHK8xp46sNbfyADH4zyqSkWMheheLqoPg3xGYjp8jvab4B_UBqhGMBJ2NkkhX1Rrrs9xKdo60xdL_gF0kmhEnEs4ynBsVeOKaJ40kRkC-RkUtrSQ5VoQGThQVyzc-86qWVhDuR-9QfV7OQZRnpCr3NWfAuAjsCx-ycWyN2rWgBjfdUW8MwV4DRym1QhghkONzCz9PjQhE",
+                Icon(
+                    Icons.Default.Star,
                     contentDescription = "CoupleSpace Logo",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Crop
+                    tint = Color(0xFF00F0FF),
+                    modifier = Modifier.size(48.dp)
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "COUPLESPACE",
+                text = "CoupleSpace",
                 style = MaterialTheme.typography.headlineLarge,
                 color = Color(0xFF00F0FF),
                 fontWeight = FontWeight.Bold,
@@ -159,7 +156,7 @@ fun LoginScreen(viewModel: CoupleSpaceViewModel, onLoginSuccess: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Seja bem-vinda",
+                        text = "Seja bem-vindo(a)",
                         style = MaterialTheme.typography.headlineMedium,
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold
@@ -191,7 +188,7 @@ fun LoginScreen(viewModel: CoupleSpaceViewModel, onLoginSuccess: () -> Unit) {
                         OutlinedTextField(
                             value = identity,
                             onValueChange = { identity = it },
-                            placeholder = { Text("seu nome estelar", color = Color(0xFFB9CACB).copy(alpha = 0.5f)) },
+                            placeholder = { Text("Seu nome estelar", color = Color(0xFFB9CACB).copy(alpha = 0.5f)) },
                             leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFCABEFF)) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -270,7 +267,7 @@ fun LoginScreen(viewModel: CoupleSpaceViewModel, onLoginSuccess: () -> Unit) {
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "VIAJAR PARA O DIÁRIO",
+                                text = "VIAJAR PARA O ESPAÇO",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = Color(0xFFCABEFF),
                                 fontWeight = FontWeight.Bold,
@@ -295,7 +292,7 @@ fun LoginScreen(viewModel: CoupleSpaceViewModel, onLoginSuccess: () -> Unit) {
 
                     Row {
                         Text(
-                            text = "Nova exploradora? ",
+                            text = "Novos exploradores? ",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFFB9CACB)
                         )

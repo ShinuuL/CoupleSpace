@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-17
+goal: Migrate CoupleSpace from local-only SQLite to Supabase-powered backend
+  with real-time sync, partner auth, and cloud storage

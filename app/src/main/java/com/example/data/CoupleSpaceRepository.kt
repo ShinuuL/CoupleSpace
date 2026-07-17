@@ -1,120 +1,364 @@
 package com.example.data
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.realtime.*
+import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlin.random.Random
 
-class CoupleSpaceRepository(private val dao: CoupleSpaceDao) {
+var currentUserName = ""
 
-    val diaryNotes: Flow<List<DiaryNote>> = dao.getDiaryNotesFlow()
-    val moodLogs: Flow<List<MoodLog>> = dao.getMoodLogsFlow()
-    val calendarEvents: Flow<List<CalendarEvent>> = dao.getCalendarEventsFlow()
-    val chatMessages: Flow<List<ChatMessage>> = dao.getChatMessagesFlow()
+class CoupleSpaceRepository(private val supabase: SupabaseClient) {
 
-    suspend fun addDiaryNote(text: String, imageUrl: String?, dateText: String, tiltAngle: Float) {
-        dao.insertDiaryNote(DiaryNote(text = text, imageUrl = imageUrl, dateText = dateText, tiltAngle = tiltAngle))
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _diaryNotes = MutableStateFlow<List<DiaryNote>>(emptyList())
+    val diaryNotes: StateFlow<List<DiaryNote>> = _diaryNotes.asStateFlow()
+
+    private val _moodLogs = MutableStateFlow<List<MoodLog>>(emptyList())
+    val moodLogs: StateFlow<List<MoodLog>> = _moodLogs.asStateFlow()
+
+    private val _calendarEvents = MutableStateFlow<List<CalendarEvent>>(emptyList())
+    val calendarEvents: StateFlow<List<CalendarEvent>> = _calendarEvents.asStateFlow()
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _spaceConfig = MutableStateFlow<SpaceConfig?>(null)
+    val spaceConfig: StateFlow<SpaceConfig?> = _spaceConfig.asStateFlow()
+
+    private val _partnerTyping = MutableStateFlow(false)
+    val partnerTyping: StateFlow<Boolean> = _partnerTyping.asStateFlow()
+
+    private val offlineQueue = mutableListOf<suspend () -> Unit>()
+
+    init {
+        setupRealtimeSubscriptions()
+    }
+
+    private fun setupRealtimeSubscriptions() {
+        scope.launch {
+            supabase.from("memories").select().decodeList<Memory>().let { memories ->
+                _diaryNotes.value = memories.map { it.toDiaryNote() }
+            }
+        }
+
+        scope.launch {
+            supabase.from("feelings").select().decodeList<Feeling>().let { feelings ->
+                _moodLogs.value = feelings.map { it.toMoodLog() }
+            }
+        }
+
+        scope.launch {
+            supabase.from("events").select().decodeList<CalendarEventData>().let { events ->
+                _calendarEvents.value = events.map { it.toCalendarEvent() }
+            }
+        }
+
+        scope.launch {
+            supabase.from("messages").select().decodeList<MessageData>().let { messages ->
+                _chatMessages.value = messages.map { it.toChatMessage() }
+            }
+        }
+
+        scope.launch {
+            supabase.realtime.connect()
+        }
+
+        scope.launch {
+            val channel = supabase.channel("schema-public-changes")
+            scope.launch {
+                channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "messages"
+                }.collect { change -> handleRealtimeChange("messages", change) }
+            }
+            scope.launch {
+                channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "memories"
+                }.collect { change -> handleRealtimeChange("memories", change) }
+            }
+            scope.launch {
+                channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "feelings"
+                }.collect { change -> handleRealtimeChange("feelings", change) }
+            }
+            scope.launch {
+                channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "events"
+                }.collect { change -> handleRealtimeChange("events", change) }
+            }
+            scope.launch {
+                channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "typing_presence"
+                }.collect { change -> handleRealtimeChange("typing_presence", change) }
+            }
+            channel.subscribe()
+        }
+    }
+
+    private suspend fun handleRealtimeChange(table: String, change: PostgresAction) {
+        try {
+            when (table) {
+                "messages" -> {
+                    if (change is PostgresAction.Insert) {
+                        val newMsg = decodeMessageFromJson(change.record)
+                        if (newMsg != null && _chatMessages.value.none { it.id == newMsg.id }) {
+                            _chatMessages.value = _chatMessages.value + newMsg
+                        }
+                    } else {
+                        refreshTable(table)
+                    }
+                }
+                "typing_presence" -> {
+                    val raw = when (change) {
+                        is PostgresAction.Insert, is PostgresAction.Update -> change.record
+                        else -> return
+                    }
+                    val user = raw["user"]?.jsonPrimitive?.content
+                    val isTyping = raw["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
+                    if (user != null && user != currentUserName) {
+                        _partnerTyping.value = isTyping
+                    }
+                }
+                else -> refreshTable(table)
+            }
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun refreshTable(table: String) {
+        when (table) {
+            "messages" -> {
+                val fresh = supabase.from("messages").select().decodeList<MessageData>()
+                _chatMessages.value = fresh.map { it.toChatMessage() }
+            }
+            "memories" -> {
+                val fresh = supabase.from("memories").select().decodeList<Memory>()
+                _diaryNotes.value = fresh.map { it.toDiaryNote() }
+            }
+            "feelings" -> {
+                val fresh = supabase.from("feelings").select().decodeList<Feeling>()
+                _moodLogs.value = fresh.map { it.toMoodLog() }
+            }
+            "events" -> {
+                val fresh = supabase.from("events").select().decodeList<CalendarEventData>()
+                _calendarEvents.value = fresh.map { it.toCalendarEvent() }
+            }
+        }
+    }
+
+    private fun decodeMessageFromJson(json: JsonObject): ChatMessage? {
+        return try {
+            val id = json["id"]?.jsonPrimitive?.content ?: return null
+            val sender = json["sender"]?.jsonPrimitive?.content ?: return null
+            val text = json["text"]?.jsonPrimitive?.content ?: ""
+            val imageUrl = json["image_url"]?.jsonPrimitive?.content
+            val createdAt = json["created_at"]?.jsonPrimitive?.content
+            ChatMessage(
+                id = id,
+                sender = sender,
+                text = text,
+                imageUrl = if (imageUrl.isNullOrBlank()) null else imageUrl,
+                isReceived = currentUserName.isNotEmpty() && sender != currentUserName,
+                timestamp = parseTimestamp(createdAt)
+            )
+        } catch (_: Exception) { null }
+    }
+
+    private fun parseTimestamp(ts: String?): Long {
+        if (ts == null) return System.currentTimeMillis()
+        return try {
+            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse(ts.take(19))?.time ?: System.currentTimeMillis()
+        } catch (_: Exception) { System.currentTimeMillis() }
+    }
+
+    suspend fun authenticate(name: String, secretKey: String): Boolean {
+        return try {
+            val configs = supabase.from("space_config")
+                .select { filter { eq("id", 1) } }
+                .decodeList<SpaceConfig>()
+            val config = configs.firstOrNull()
+            if (config != null) {
+                val nameValid = name == config.user1Name || name == config.user2Name
+                val keyValid = secretKey == config.secretKey
+                if (nameValid && keyValid) {
+                    currentUserName = name
+                    _spaceConfig.value = config
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } catch (_: Exception) { false }
+    }
+
+    fun checkLocalSession(name: String, key: String): Boolean {
+        return name.isNotBlank() && key.isNotBlank()
+    }
+
+    suspend fun addDiaryNote(text: String, imageUrl: String? = null) {
+        try {
+            val memory = supabase.from("memories").insert(
+                mapOf(
+                    "image_url" to (imageUrl ?: ""),
+                    "caption" to text,
+                    "rotation" to (Random.nextFloat() * 6f - 3f)
+                )
+            ) { select() }.decodeSingle<Memory>()
+            val note = memory.toDiaryNote()
+            _diaryNotes.value = _diaryNotes.value + note
+        } catch (_: Exception) {
+            offlineQueue.add {
+                addDiaryNote(text, imageUrl)
+            }
+        }
     }
 
     suspend fun addMoodLog(mood: String) {
-        dao.insertMoodLog(MoodLog(mood = mood))
+        try {
+            val emojiMap = mapOf(
+                "Radiante" to "\uD83C\uDF1F",
+                "Calmo" to "\uD83D\uDCA7",
+                "Melancólico" to "\uD83C\uDF19",
+                "Feliz" to "\u2764\uFE0F"
+            )
+            supabase.from("feelings").upsert(
+                mapOf(
+                    "user" to currentUserName,
+                    "emoji" to (emojiMap[mood] ?: mood),
+                    "text" to mood
+                )
+            ) { onConflict = "user" }
+            val fresh = supabase.from("feelings").select().decodeList<Feeling>()
+            _moodLogs.value = fresh.map { it.toMoodLog() }
+        } catch (_: Exception) {
+            offlineQueue.add { addMoodLog(mood) }
+        }
     }
 
     suspend fun addCalendarEvent(title: String, description: String, dateStr: String, category: String) {
-        dao.insertCalendarEvent(CalendarEvent(title = title, description = description, dateStr = dateStr, category = category))
-    }
-
-    suspend fun deleteCalendarEvent(id: Int) {
-        dao.deleteCalendarEvent(id)
-    }
-
-    suspend fun addChatMessage(sender: String, text: String, imageUrl: String?, isReceived: Boolean) {
-        dao.insertChatMessage(ChatMessage(sender = sender, text = text, imageUrl = imageUrl, isReceived = isReceived))
-    }
-
-    // Populate default database content (matching the HTML designs exactly) if empty
-    suspend fun seedDatabaseIfEmpty() {
-        // Seed chat messages if empty
-        val messages = chatMessages.first()
-        if (messages.isEmpty()) {
-            addChatMessage(
-                sender = "Meu Bem",
-                text = "Oi vida, estava pensando na gente e naquele café que tomamos ontem. Foi tão especial...",
-                imageUrl = null,
-                isReceived = true
+        try {
+            supabase.from("events").insert(
+                mapOf(
+                    "title" to title,
+                    "description" to description,
+                    "event_date" to dateStr,
+                    "category" to category,
+                    "user" to currentUserName
+                )
             )
-            addChatMessage(
-                sender = "Você",
-                text = "Eu também! Sinto que cada momento com você é como um capítulo lindo do nosso diário. 🌌",
-                imageUrl = null,
-                isReceived = false
-            )
-            addChatMessage(
-                sender = "Meu Bem",
-                text = "Olha o que achei entre as páginas do meu livro!",
-                imageUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuBOD4vc3hwAZNPkPBwYACZ9guZHn4gZD1zy7rDk4UcV7ODDO7yD_LIDdLIbwKCia1HUTHU1JKgqhoOKdMS2OYT0cAgXW6pDTxfA4WZ1IenqfbzaPP6QWZCmSeJvyz4tU0OlXS-k86eejCXMgMGEVd-_5r8dXubUR-RZe-5Zh94nflOEmL_MYJzG_KmgANdRxMUUwS4iAt11lmw2ZeEUAYwtJWhb1BK9f6Upot_ctC-4DPwgE6Rm4cH9Ig",
-                isReceived = true
-            )
-            addChatMessage(
-                sender = "Você",
-                text = "Que coisa mais linda! Você sempre encontra poesia em tudo, até nas pequenas estrelas do dia a dia.",
-                imageUrl = null,
-                isReceived = false
-            )
-        }
-
-        // Seed diary notes if empty
-        val notes = diaryNotes.first()
-        if (notes.isEmpty()) {
-            // Note 1: Last memory
-            addDiaryNote(
-                text = "\"Aquele café da manhã que parecia durar uma eternidade...\"",
-                imageUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuCNURmHCTXzHaYWIrnI_dindiIPyOJckQEAy3cMNXwVexUsimf2inNFZWn4cCOXTM_GkXE-1mm3IQXijfSUO_ZIqK-vzZFLuATju1OV2v3dNoAl8xVi2zQTBKD8TJdD8DgxDymfcIPOO2tJ2_ZwPY7H2tzTob1Y62riznsu6lYNA1YBMsVrRYHHtDkzqZb9qqLxmxt7k44_XyAeqcypH7K8FN441XuFzmKRaQaGtTWQoF6OLMa3qkaloQ",
-                dateText = "Ontem",
-                tiltAngle = -1.5f
-            )
-            // Note 2: Photo grid item 1 (Wildflowers)
-            addDiaryNote(
-                text = "Flores silvestres recolhidas no caminho",
-                imageUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuASnfAdKSys1UecHsW5zDUs8ZVMMAXBRH6toAifX23ffLgbf2qQaNLMrlSUhgYy7KJnZfRw-akpXw7nEl7L49sTW74rDbBKz9nOiD3Komt_gBGzMEqX5k05RhNtUkWFoWRuFhkYVubYfqvvWQQk3Uw1AOXewwlhRFOFSUPDxYfj-NxsE1t_RNMAuyW6S7HgkEpyGKyyNfpEdQIt5HMTzkUXVf4C2g4OGkA0ZxQDMeDYRrGAaFT9tPRwag",
-                dateText = "Outubro",
-                tiltAngle = 2f
-            )
-            // Note 3: Photo grid item 2 (Candle and books)
-            addDiaryNote(
-                text = "Leitura e luz quente nas noites frias",
-                imageUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuBf2QQCQ8Q92ujvuNX2q6rLwK2kDvxTFQkP9ElPLYSEkAgbACMmAd84j9s1fGMdKWfRFCJNLpbZOy7DCzDmRzuSuiONRjuFGA3-b2zwsY8iGYbFuFnWYAuX-Qm2qJteCLCCDLcwRg8A4jt81UxtDqOnEjOkWcdNEezr0xZKmzqlLqszQjSSPa-QG5_yudkkWPF4qhVrpaQhqChnPm8xmrPWNRd9oVUDs9YY7PYqyEGqWBYQnMjIPHYztQ",
-                dateText = "Setembro",
-                tiltAngle = -3f
-            )
-            // Note 4: Photo grid item 3 (Sunset)
-            addDiaryNote(
-                text = "Pôr do sol dourado através das cortinas",
-                imageUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuBb6p7t2gu-a-iXp9oNiTw05uuSlBSQJn6Hw1Kav-SbGw7VVV0YQ_5kyh4nVmzHsbCmCbpl53TIsm-SRnYNKQW5X3djDlYOCoYXpZn04djuie2nhGqHr0jq8UKGbylAnmbmYPfsK4mp79G3g1vGxtD0EXCXo9udsFWEewRcjlBVL7N_uAEmgpEw2QAb_h-j1UfTozdY1jppDG_Nj6Xs-9xG5C63BBttsjYHVMdjuuHhtazIi-BSbmbl4g",
-                dateText = "Agosto",
-                tiltAngle = 1.5f
-            )
-        }
-
-        // Seed calendar events if empty
-        val events = calendarEvents.first()
-        if (events.isEmpty()) {
-            addCalendarEvent(
-                title = "Nosso Aniversário",
-                description = "Preparar aquela surpresa especial ✨",
-                dateStr = "2024-11-04",
-                category = "anniversary"
-            )
-            addCalendarEvent(
-                title = "Viagem Planejada",
-                description = "Destino: Gramado - Frio e Fondue 🏔️",
-                dateStr = "2024-11-15",
-                category = "travel"
-            )
-            addCalendarEvent(
-                title = "Jantar Especial",
-                description = "Lugar novo que você salvou no Insta 🍽️",
-                dateStr = "2024-11-22",
-                category = "dinner"
-            )
+            val fresh = supabase.from("events").select().decodeList<CalendarEventData>()
+            _calendarEvents.value = fresh.map { it.toCalendarEvent() }
+        } catch (_: Exception) {
+            offlineQueue.add { addCalendarEvent(title, description, dateStr, category) }
         }
     }
+
+    suspend fun deleteCalendarEvent(localId: String) {
+        try {
+            supabase.from("events").delete { filter { eq("id", localId) } }
+            _calendarEvents.value = _calendarEvents.value.filter { it.id != localId }
+        } catch (_: Exception) { }
+    }
+
+    suspend fun addChatMessage(sender: String, text: String, imageUrl: String? = null, isReceived: Boolean, audioUrl: String? = null, audioDuration: Float? = null) {
+        try {
+            val msgMap = mutableMapOf<String, Any?>(
+                "sender" to sender,
+                "text" to text
+            )
+            if (imageUrl != null) msgMap["image_url"] = imageUrl
+            if (audioUrl != null) msgMap["audio_url"] = audioUrl
+            if (audioDuration != null) msgMap["audio_duration"] = audioDuration
+
+            supabase.from("messages").insert(msgMap)
+        } catch (_: Exception) {
+            offlineQueue.add { addChatMessage(sender, text, imageUrl, isReceived, audioUrl, audioDuration) }
+        }
+    }
+
+    suspend fun sendTypingStatus(user: String, isTyping: Boolean) {
+        try {
+            supabase.from("typing_presence").upsert(
+                mapOf(
+                    "user" to user,
+                    "is_typing" to isTyping
+                )
+            )
+        } catch (_: Exception) { }
+    }
+
+    suspend fun updateMusicConfig(spotifyUrl: String?, customAudioUrl: String?, customAudioName: String?) {
+        try {
+            val updateMap = mutableMapOf<String, Any?>()
+            if (spotifyUrl != null) updateMap["spotify_url"] = spotifyUrl
+            if (customAudioUrl != null) updateMap["custom_audio_url"] = customAudioUrl
+            if (customAudioName != null) updateMap["custom_audio_name"] = customAudioName
+            supabase.from("space_config").update(updateMap) { filter { eq("id", 1) } }
+            val fresh = supabase.from("space_config").select().decodeList<SpaceConfig>()
+            _spaceConfig.value = fresh.firstOrNull()
+        } catch (_: Exception) { }
+    }
+
+    suspend fun uploadAudio(bytes: ByteArray): String? {
+        return try {
+            val fileName = "audio/${java.util.UUID.randomUUID()}.mp3"
+            supabase.storage.from("memories").upload(fileName, bytes)
+            supabase.storage.from("memories").publicUrl(fileName).toString()
+        } catch (_: Exception) { null }
+    }
+
+    suspend fun uploadImage(bytes: ByteArray): String? {
+        return try {
+            val fileName = "notes/${java.util.UUID.randomUUID()}.jpg"
+            supabase.storage.from("memories").upload(fileName, bytes)
+            supabase.storage.from("memories").publicUrl(fileName).toString()
+        } catch (_: Exception) { null }
+    }
+
+    private fun Memory.toDiaryNote() = DiaryNote(
+        id = id,
+        text = caption ?: "",
+        imageUrl = if (imageUrl.isBlank()) null else imageUrl,
+        dateText = "",
+        tiltAngle = rotation ?: 0f,
+        timestamp = parseTimestamp(createdAt)
+    )
+
+    private fun Feeling.toMoodLog() = MoodLog(
+        id = user,
+        mood = text ?: emoji,
+        timestamp = parseTimestamp(updatedAt)
+    )
+
+    private fun CalendarEventData.toCalendarEvent() = CalendarEvent(
+        id = id,
+        title = title,
+        description = description ?: "",
+        dateStr = eventDate,
+        category = category,
+        timestamp = parseTimestamp(createdAt)
+    )
+
+    private fun MessageData.toChatMessage() = ChatMessage(
+        id = id,
+        sender = sender,
+        text = text ?: "",
+        imageUrl = imageUrl,
+        audioUrl = audioUrl,
+        audioDuration = audioDuration,
+        isReceived = isReceived,
+        timestamp = parseTimestamp(createdAt)
+    )
 }

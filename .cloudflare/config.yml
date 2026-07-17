@@ -1,0 +1,9 @@
+tunnel: c5401e4e-1326-4203-914d-8ad8ef5a8d6a
+credentials-file: C:\Users\kinga\.cloudflared\c5401e4e-1326-4203-914d-8ad8ef5a8d6a.json
+
+ingress:
+  - hostname: functions.couplespace.app
+    service: https://lzarbmfzskmwzcuudauv.functions.supabase.co
+    originRequest:
+      noTLSVerify: false
+  - service: http_status:404

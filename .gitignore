@@ -16,3 +16,7 @@
 local.properties
 .env
 debug.keystore
+.cloudflare/credentials.json
+supabase/.branches
+supabase/functions/*/service-account.json
+README.md

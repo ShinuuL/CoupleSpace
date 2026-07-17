@@ -22,9 +22,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import com.example.data.ChatMessage
 import com.example.ui.CoupleSpaceViewModel
@@ -42,6 +45,25 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val partnerTyping by viewModel.partnerTyping.collectAsState()
+    val config by viewModel.spaceConfig.collectAsState()
+
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.sendChatAudio(uri)
+        }
+    }
+
+    // Typing indicator debounce
+    LaunchedEffect(inputText) {
+        if (inputText.isNotBlank()) {
+            viewModel.sendTyping(true)
+        }
+        delay(2000)
+        viewModel.sendTyping(false)
+    }
 
     // Trigger auto scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
@@ -65,38 +87,51 @@ fun ChatScreen(
                                 .clip(CircleShape)
                                 .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.4f), CircleShape)
                         ) {
-                            AsyncImage(
-                                model = "https://lh3.googleusercontent.com/aida-public/AB6AXuAJjlYQt-BYFjCO8wDzaJFvaxtXIjpryfzuYOWTXmMDBj5Ts7Tb6O7juNtJb7f2chVYDNIM6THO7WPM31S-CpwC_YH7LVqgGnqXTMyHNfHupwkKsIOEBnGQbgk5hRBGsgWUWNP_64bEhB4XsiHcjMf8MqdQViKQtQtNO1apDFTBNzMG4RvAbUa4UvgHf59DcvMvk2fP_wqB87g7hiM2hi4l4LZ9dtkKMGO7f9LesTWHXjuP6CdQNiOcEw",
-                                contentDescription = "Meu Bem",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-
-                        Column {
-                            Text(
-                                "Meu Bem",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
+                            val config by viewModel.spaceConfig.collectAsState()
+                            val avatarUrl = config?.user2Avatar?.takeIf { it.isNotBlank() }
+                            if (avatarUrl != null) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = "Meu Bem",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
                                 Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF00F0FF), CircleShape)
-                                )
-                                Text(
-                                    "escrevendo...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF00F0FF),
-                                    fontSize = 10.sp
-                                )
+                                    modifier = Modifier.fillMaxSize().background(Color(0xFF272936), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFB9CACB), modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
+
+                            Column {
+                                Text(
+                                    "Meu Bem",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (partnerTyping) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .background(Color(0xFF00F0FF), CircleShape)
+                                        )
+                                        Text(
+                                            "escrevendo...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF00F0FF),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
                     }
                 },
                 navigationIcon = {
@@ -138,6 +173,9 @@ fun ChatScreen(
                         IconButton(onClick = {}) {
                             Icon(Icons.Default.AddCircle, contentDescription = "Adicionar", tint = Color(0xFF00F0FF))
                         }
+                        IconButton(onClick = { audioPickerLauncher.launch("audio/*") }) {
+                            Icon(Icons.Default.Mic, contentDescription = "Áudio", tint = Color(0xFFB9CACB))
+                        }
                         IconButton(onClick = {}) {
                             Icon(Icons.Default.Image, contentDescription = "Galeria", tint = Color(0xFFB9CACB))
                         }
@@ -160,6 +198,7 @@ fun ChatScreen(
                             onClick = {
                                 if (inputText.isNotBlank()) {
                                     viewModel.sendChatMessage(inputText)
+                                    viewModel.sendTyping(false)
                                     inputText = ""
                                 }
                             },
@@ -300,7 +339,34 @@ fun ChatMessageBubble(message: ChatMessage) {
                 Column(
                     modifier = Modifier.padding(if (message.imageUrl != null) 4.dp else 12.dp)
                 ) {
-                    if (message.imageUrl != null) {
+                    if (message.audioUrl != null) {
+                        val context = LocalContext.current
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF141828).copy(alpha = 0.5f))
+                                .clickable {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(message.audioUrl))
+                                    context.startActivity(intent)
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Ouvir", tint = Color(0xFF00F0FF), modifier = Modifier.size(32.dp))
+                            Column {
+                                Text("Mensagem de áudio", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB9CACB))
+                                if (message.audioDuration != null) {
+                                    Text("%.0fs".format(message.audioDuration), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                }
+                            }
+                        }
+                        if (message.text.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = message.text, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                        }
+                    } else if (message.imageUrl != null) {
                         Column(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))

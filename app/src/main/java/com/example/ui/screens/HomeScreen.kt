@@ -1,7 +1,8 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,9 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -48,8 +49,10 @@ fun HomeScreen(
 
     val notes by viewModel.diaryNotes.collectAsState()
     val loggedUser by viewModel.username.collectAsState()
+    val config by viewModel.spaceConfig.collectAsState()
 
     var showAddNoteDialog by remember { mutableStateOf(false) }
+    var showMusicConfigDialog by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -63,7 +66,8 @@ fun HomeScreen(
                         .fillMaxHeight()
                         .padding(24.dp)
                 ) {
-                    // Drawer Header
+                    // Drawer Header - user avatar or initials
+                    val avatarUrl = if (loggedUser == config?.user1Name) config?.user1Avatar else config?.user2Avatar
                     Box(
                         modifier = Modifier
                             .size(80.dp)
@@ -72,12 +76,16 @@ fun HomeScreen(
                             .background(Color(0xFF00F0FF).copy(alpha = 0.1f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        AsyncImage(
-                            model = "https://lh3.googleusercontent.com/aida-public/AB6AXuDxwg-GLB8AhUEPZwbusbW6eNQn3tND1WSmx7cMARSNW47fTM71m7Pm83cKSL5--PHszACgG8K14MFZf4Y-AIunKyoo5pXcuzDfz1gVK3nQQyS4v7WZd-IooSdN2xgoRnQDylsQgcajnZGZwPS9W1LVgN3y96Hd3plwG6-BCBzw4lEpTaFMG9r58fPDgX7IGgv-Ro3e5Twyo5d8ErDMi_FqUvAF1AsTjgkpb_dgQmzySCPCDSJ45IBm20Tv6cVk1Cwd4uw",
-                            contentDescription = "Logo",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
+                        if (avatarUrl != null) {
+                            AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = "Avatar",
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.Person, contentDescription = "Avatar", tint = Color(0xFF00F0FF), modifier = Modifier.size(40.dp))
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -172,10 +180,22 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFCABEFF), modifier = Modifier.size(28.dp))
-                            Column {
+                            if (avatarUrl != null) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(28.dp).clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFCABEFF), modifier = Modifier.size(28.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(loggedUser, style = MaterialTheme.typography.bodyLarge, color = Color.White, fontWeight = FontWeight.SemiBold)
                                 Text("Exploradora", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFB9CACB))
+                            }
+                            IconButton(onClick = { viewModel.logout() }) {
+                                Icon(Icons.Default.Logout, contentDescription = "Sair", tint = Color(0xFFCABEFF).copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -502,8 +522,22 @@ fun HomeScreen(
                             Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFFCABEFF).copy(alpha = 0.15f)))
                         }
 
-                        // Reusable Music Player Card
-                        var isPlaying by remember { mutableStateOf(false) }
+// Music Player Card - custom audio or Spotify from space_config
+                        val customAudioUrl = config?.customAudioUrl
+                        val customAudioName = config?.customAudioName
+                        val spotifyUrl = config?.spotifyUrl
+                        val musicTitle = when {
+                            !customAudioName.isNullOrBlank() -> customAudioName
+                            !customAudioUrl.isNullOrBlank() -> "Áudio Personalizado"
+                            !spotifyUrl.isNullOrBlank() -> "Spotify"
+                            else -> null
+                        }
+                        val musicUrl = when {
+                            !customAudioUrl.isNullOrBlank() -> customAudioUrl
+                            !spotifyUrl.isNullOrBlank() -> spotifyUrl
+                            else -> null
+                        }
+                        val context = LocalContext.current
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF272936).copy(alpha = 0.6f)),
                             shape = RoundedCornerShape(24.dp),
@@ -511,6 +545,14 @@ fun HomeScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
+                                .clickable {
+                                    if (musicUrl != null) {
+                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(musicUrl))
+                                        context.startActivity(intent)
+                                    } else {
+                                        showMusicConfigDialog = true
+                                    }
+                                }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -522,32 +564,29 @@ fun HomeScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(48.dp)
-                                        .background(Color(0xFF00F0FF), RoundedCornerShape(12.dp)),
+                                        .background(if (musicUrl != null) Color(0xFF00F0FF) else Color(0xFFCABEFF).copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         Icons.Outlined.MusicNote,
                                         contentDescription = null,
-                                        tint = Color(0xFF00363A),
+                                        tint = if (musicUrl != null) Color(0xFF00363A) else Color(0xFFCABEFF).copy(alpha = 0.4f),
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Nossa Música", style = MaterialTheme.typography.labelSmall, color = Color.White)
                                     Text(
-                                        "Lembranças de Outono",
+                                        musicTitle ?: "Nenhuma música configurada",
                                         style = MaterialTheme.typography.bodyLarge,
-                                        color = Color(0xFF00F0FF),
+                                        color = if (musicTitle != null) Color(0xFF00F0FF) else Color(0xFFCABEFF).copy(alpha = 0.4f),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-                                IconButton(onClick = { isPlaying = !isPlaying }) {
-                                    Icon(
-                                        imageVector = if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
-                                        contentDescription = "Tocar",
-                                        tint = Color(0xFF00F0FF),
-                                        modifier = Modifier.size(40.dp)
-                                    )
+                                if (musicUrl != null) {
+                                    IconButton(onClick = { showMusicConfigDialog = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Alterar", tint = Color(0xFFCABEFF).copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                                    }
                                 }
                             }
                         }
@@ -609,15 +648,13 @@ fun HomeScreen(
     // Modal Dialog to add a Sweet Note
     if (showAddNoteDialog) {
         var noteText by remember { mutableStateOf("") }
-        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
+        var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
-        // Custom list of direct image links from HTML so they can be selected easily!
-        val predefinedImages = listOf(
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuCNURmHCTXzHaYWIrnI_dindiIPyOJckQEAy3cMNXwVexUsimf2inNFZWn4cCOXTM_GkXE-1mm3IQXijfSUO_ZIqK-vzZFLuATju1OV2v3dNoAl8xVi2zQTBKD8TJdD8DgxDymfcIPOO2tJ2_ZwPY7H2tzTob1Y62riznsu6lYNA1YBMsVrRYHHtDkzqZb9qqLxmxt7k44_XyAeqcypH7K8FN441XuFzmKRaQaGtTWQoF6OLMa3qkaloQ" to "Café",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuASnfAdKSys1UecHsW5zDUs8ZVMMAXBRH6toAifX23ffLgbf2qQaNLMrlSUhgYy7KJnZfRw-akpXw7nEl7L49sTW74rDbBKz9nOiD3Komt_gBGzMEqX5k05RhNtUkWFoWRuFhkYVubYfqvvWQQk3Uw1AOXewwlhRFOFSUPDxYfj-NxsE1t_RNMAuyW6S7HgkEpyGKyyNfpEdQIt5HMTzkUXVf4C2g4OGkA0ZxQDMeDYRrGAaFT9tPRwag" to "Flores",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuBf2QQCQ8Q92ujvuNX2q6rLwK2kDvxTFQkP9ElPLYSEkAgbACMmAd84j9s1fGMdKWfRFCJNLpbZOy7DCzDmRzuSuiONRjuFGA3-b2zwsY8iGYbFuFnWYAuX-Qm2qJteCLCCDLcwRg8A4jt81UxtDqOnEjOkWcdNEezr0xZKmzqlLqszQjSSPa-QG5_yudkkWPF4qhVrpaQhqChnPm8xmrPWNRd9oVUDs9YY7PYqyEGqWBYQnMjIPHYztQ" to "Vela",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuBb6p7t2gu-a-iXp9oNiTw05uuSlBSQJn6Hw1Kav-SbGw7VVV0YQ_5kyh4nVmzHsbCmCbpl53TIsm-SRnYNKQW5X3djDlYOCoYXpZn04djuie2nhGqHr0jq8UKGbylAnmbmYPfsK4mp79G3g1vGxtD0EXCXo9udsFWEewRcjlBVL7N_uAEmgpEw2QAb_h-j1UfTozdY1jppDG_Nj6Xs-9xG5C63BBttsjYHVMdjuuHhtazIi-BSbmbl4g" to "Sunset"
-        )
+        val galleryLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri ->
+            selectedImageUri = uri
+        }
 
         AlertDialog(
             onDismissRequest = { showAddNoteDialog = false },
@@ -641,43 +678,25 @@ fun HomeScreen(
                         )
                     )
 
-                    // Pick image link
-                    Text("Escolher Imagem Galáctica:", style = MaterialTheme.typography.labelSmall, color = Color(0xFF00F0FF))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(predefinedImages) { (url, name) ->
-                            Box(
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(
-                                        width = if (selectedImageUrl == url) 2.dp else 1.dp,
-                                        color = if (selectedImageUrl == url) Color(0xFF00F0FF) else Color.Gray,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { selectedImageUrl = url }
-                            ) {
-                                AsyncImage(
-                                    model = url,
-                                    contentDescription = name,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.Black.copy(0.4f))
-                                        .align(Alignment.BottomCenter)
-                                ) {
-                                    Text(
-                                        name,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        modifier = Modifier.align(Alignment.Center)
-                                    )
-                                }
-                            }
-                        }
+                    // Galeria picker button
+                    Text("Adicionar Foto:", style = MaterialTheme.typography.labelSmall, color = Color(0xFF00F0FF))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF272936).copy(alpha = 0.5f))
+                            .clickable { galleryLauncher.launch("image/*") }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = "Galeria", tint = Color(0xFF00F0FF))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            if (selectedImageUri != null) "Foto selecionada" else "Selecionar da Galeria",
+                            color = if (selectedImageUri != null) Color(0xFF00F0FF) else Color(0xFFB9CACB)
+                        )
                     }
                 }
             },
@@ -685,7 +704,7 @@ fun HomeScreen(
                 Button(
                     onClick = {
                         if (noteText.isNotBlank()) {
-                            viewModel.addNote(noteText, selectedImageUrl)
+                            viewModel.uploadAndAddNote(noteText, selectedImageUri)
                             showAddNoteDialog = false
                         }
                     },
@@ -696,6 +715,71 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddNoteDialog = false }) {
+                    Text("Cancelar", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF141828)
+        )
+    }
+
+    // Music Config Dialog
+    if (showMusicConfigDialog) {
+        var spotifyInput by remember { mutableStateOf(config?.spotifyUrl ?: "") }
+        var customAudioInput by remember { mutableStateOf(config?.customAudioUrl ?: "") }
+        var customNameInput by remember { mutableStateOf(config?.customAudioName ?: "") }
+
+        AlertDialog(
+            onDismissRequest = { showMusicConfigDialog = false },
+            title = { Text("Nossa Música", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = spotifyInput,
+                        onValueChange = { spotifyInput = it },
+                        label = { Text("Link do Spotify", color = Color.Gray) },
+                        placeholder = { Text("https://open.spotify.com/...", color = Color.DarkGray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF00F0FF), unfocusedBorderColor = Color(0xFFCABEFF).copy(alpha = 0.3f)),
+                        singleLine = true
+                    )
+                    Text("— ou —", color = Color.Gray, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    OutlinedTextField(
+                        value = customAudioInput,
+                        onValueChange = { customAudioInput = it },
+                        label = { Text("Link de Áudio Personalizado", color = Color.Gray) },
+                        placeholder = { Text("https://...mp3", color = Color.DarkGray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF00F0FF), unfocusedBorderColor = Color(0xFFCABEFF).copy(alpha = 0.3f)),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = customNameInput,
+                        onValueChange = { customNameInput = it },
+                        label = { Text("Nome do Áudio", color = Color.Gray) },
+                        placeholder = { Text("Ex: Nosso Som", color = Color.DarkGray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF00F0FF), unfocusedBorderColor = Color(0xFFCABEFF).copy(alpha = 0.3f)),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.updateMusicConfig(
+                            spotifyUrl = spotifyInput.ifBlank { null },
+                            customAudioUrl = customAudioInput.ifBlank { null },
+                            customAudioName = customNameInput.ifBlank { null }
+                        )
+                        showMusicConfigDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4719C9))
+                ) {
+                    Text("Salvar", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMusicConfigDialog = false }) {
                     Text("Cancelar", color = Color.LightGray)
                 }
             },

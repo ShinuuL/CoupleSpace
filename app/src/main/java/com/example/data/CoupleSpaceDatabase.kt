@@ -1,94 +1,103 @@
 package com.example.data
 
-import androidx.room.Dao
-import androidx.room.Database
-import androidx.room.Entity
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.PrimaryKey
-import androidx.room.Query
-import androidx.room.RoomDatabase
-import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-// Entities
-@Entity(tableName = "diary_notes")
+@Serializable
+data class SpaceConfig(
+    val id: Int = 1,
+    val title: String = "couplespace",
+    val subtitle: String? = null,
+    @SerialName("user1_name") val user1Name: String = "",
+    @SerialName("user2_name") val user2Name: String = "",
+    @SerialName("secret_key") val secretKey: String = "",
+    @SerialName("is_setup") val isSetup: Boolean? = false,
+    @SerialName("user1_avatar") val user1Avatar: String? = null,
+    @SerialName("user2_avatar") val user2Avatar: String? = null,
+    @SerialName("spotify_url") val spotifyUrl: String? = null,
+    @SerialName("first_photo_url") val firstPhotoUrl: String? = null,
+    @SerialName("first_photo_caption") val firstPhotoCaption: String? = null,
+    @SerialName("custom_audio_url") val customAudioUrl: String? = null,
+    @SerialName("custom_audio_name") val customAudioName: String? = null,
+)
+
+@Serializable
+data class Memory(
+    val id: String = "",
+    @SerialName("image_url") val imageUrl: String = "",
+    val caption: String? = null,
+    val rotation: Float? = 0f,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+@Serializable
+data class Feeling(
+    val user: String = "",
+    val emoji: String = "",
+    val text: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
+data class CalendarEventData(
+    val id: String = "",
+    val title: String = "",
+    val description: String? = null,
+    val category: String = "",
+    @SerialName("event_date") val eventDate: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    val user: String = "",
+)
+
+@Serializable
+data class MessageData(
+    val id: String = "",
+    val sender: String = "",
+    val text: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("audio_url") val audioUrl: String? = null,
+    @SerialName("audio_duration") val audioDuration: Float? = null,
+    @SerialName("reply_to_id") val replyToId: String? = null,
+    val reactions: Map<String, kotlinx.serialization.json.JsonElement>? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+) {
+    val isReceived: Boolean get() = currentUserName.isNotEmpty() && sender != currentUserName
+}
+
+// Legacy data classes for UI backward compatibility
+// Kept to minimize changes in screen composables
+
 data class DiaryNote(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val id: String = "",
     val text: String,
     val imageUrl: String? = null,
-    val dateText: String,
+    val dateText: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val tiltAngle: Float = 0f
 )
 
-@Entity(tableName = "mood_logs")
 data class MoodLog(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val mood: String, // e.g. "Radiante", "Calmo", "Melancólico", "Feliz"
+    val id: String = "",
+    val mood: String,
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "calendar_events")
 data class CalendarEvent(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val id: String = "",
     val title: String,
-    val description: String,
-    val dateStr: String, // format "YYYY-MM-DD" e.g., "2024-11-04"
-    val category: String, // e.g., "anniversary", "travel", "dinner"
+    val description: String = "",
+    val dateStr: String,
+    val category: String,
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "chat_messages")
 data class ChatMessage(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val sender: String, // "Meu Bem" or "Você"
+    val id: String = "",
+    val sender: String,
     val text: String,
     val imageUrl: String? = null,
+    val audioUrl: String? = null,
+    val audioDuration: Float? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val isReceived: Boolean
 )
-
-// DAOs
-@Dao
-interface CoupleSpaceDao {
-    // Diary notes
-    @Query("SELECT * FROM diary_notes ORDER BY timestamp DESC")
-    fun getDiaryNotesFlow(): Flow<List<DiaryNote>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertDiaryNote(note: DiaryNote)
-
-    // Mood logs
-    @Query("SELECT * FROM mood_logs ORDER BY timestamp DESC")
-    fun getMoodLogsFlow(): Flow<List<MoodLog>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMoodLog(log: MoodLog)
-
-    // Calendar events
-    @Query("SELECT * FROM calendar_events ORDER BY dateStr ASC")
-    fun getCalendarEventsFlow(): Flow<List<CalendarEvent>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCalendarEvent(event: CalendarEvent)
-
-    @Query("DELETE FROM calendar_events WHERE id = :id")
-    suspend fun deleteCalendarEvent(id: Int)
-
-    // Chat messages
-    @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC")
-    fun getChatMessagesFlow(): Flow<List<ChatMessage>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertChatMessage(message: ChatMessage)
-}
-
-// Database
-@Database(
-    entities = [DiaryNote::class, MoodLog::class, CalendarEvent::class, ChatMessage::class],
-    version = 1,
-    exportSchema = false
-)
-abstract class CoupleSpaceDatabase : RoomDatabase() {
-    abstract fun dao(): CoupleSpaceDao
-}

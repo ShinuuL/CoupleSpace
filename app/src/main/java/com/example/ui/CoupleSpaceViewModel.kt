@@ -1,58 +1,51 @@
 package com.example.ui
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
-class CoupleSpaceViewModel(private val repository: CoupleSpaceRepository) : ViewModel() {
+class CoupleSpaceViewModel(
+    private val repository: CoupleSpaceRepository,
+    private val app: Application? = null
+) : ViewModel() {
 
-    // Authentication / User state
     private val _isLoggedIn = MutableStateFlow(false)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
     private val _username = MutableStateFlow("")
     val username: StateFlow<String> = _username.asStateFlow()
 
+    private val _secretKey = MutableStateFlow("")
+    val secretKey: StateFlow<String> = _secretKey.asStateFlow()
+
     private val _loginError = MutableStateFlow<String?>(null)
     val loginError: StateFlow<String?> = _loginError.asStateFlow()
 
-    // UI States observed from Database Flows
     val diaryNotes: StateFlow<List<DiaryNote>> = repository.diaryNotes
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
     val moodLogs: StateFlow<List<MoodLog>> = repository.moodLogs
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
     val calendarEvents: StateFlow<List<CalendarEvent>> = repository.calendarEvents
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
     val chatMessages: StateFlow<List<ChatMessage>> = repository.chatMessages
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val spaceConfig: StateFlow<SpaceConfig?> = repository.spaceConfig
+    val partnerTyping: StateFlow<Boolean> = repository.partnerTyping
 
     init {
-        // Initialize with default seeds if empty
         viewModelScope.launch {
-            repository.seedDatabaseIfEmpty()
+            val prefs = app?.let {
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(it)
+            }
+            val savedName = prefs?.getString("username", "") ?: ""
+            val savedKey = prefs?.getString("secret_key", "") ?: ""
+            if (savedName.isNotBlank() && savedKey.isNotBlank()) {
+                val success = repository.checkLocalSession(savedName, savedKey)
+                if (success) {
+                    _username.value = savedName
+                    _secretKey.value = savedKey
+                    _isLoggedIn.value = true
+                }
+            }
         }
     }
 
@@ -61,15 +54,39 @@ class CoupleSpaceViewModel(private val repository: CoupleSpaceRepository) : View
             _loginError.value = "Identidade ou Chave Cósmica não podem ser vazias."
             return false
         }
-        _username.value = identity.trim()
-        _isLoggedIn.value = true
-        _loginError.value = null
+
+        viewModelScope.launch {
+            val authenticated = repository.authenticate(identity, secret)
+            if (authenticated) {
+                _username.value = identity.trim()
+                _secretKey.value = secret
+                _isLoggedIn.value = true
+                _loginError.value = null
+
+                app?.let {
+                    val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(it)
+                    prefs.edit()
+                        .putString("username", identity.trim())
+                        .putString("secret_key", secret)
+                        .apply()
+                }
+            } else {
+                _loginError.value = "Identidade ou Chave Cósmica inválida. Verifique com seu amor."
+            }
+        }
         return true
     }
 
     fun logout() {
         _isLoggedIn.value = false
         _username.value = ""
+        _secretKey.value = ""
+        currentUserName = ""
+
+        app?.let {
+            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(it)
+            prefs.edit().clear().apply()
+        }
     }
 
     fun logSentiment(mood: String) {
@@ -80,66 +97,70 @@ class CoupleSpaceViewModel(private val repository: CoupleSpaceRepository) : View
 
     fun addNote(text: String, imageUrl: String? = null) {
         viewModelScope.launch {
-            // Pick a random tilt angle between -3.0 and 3.0 for scrapbook effect
-            val angle = -3f + Random.nextFloat() * 6f
-            repository.addDiaryNote(
-                text = text,
-                imageUrl = imageUrl,
-                dateText = "Hoje",
-                tiltAngle = angle
-            )
+            repository.addDiaryNote(text, imageUrl)
         }
     }
 
     fun addEvent(title: String, description: String, dateStr: String, category: String) {
         viewModelScope.launch {
-            repository.addCalendarEvent(
-                title = title,
-                description = description,
-                dateStr = dateStr,
-                category = category
-            )
+            repository.addCalendarEvent(title, description, dateStr, category)
         }
     }
 
-    fun deleteEvent(id: Int) {
+    fun deleteEvent(id: String) {
         viewModelScope.launch {
             repository.deleteCalendarEvent(id)
+        }
+    }
+
+    fun sendChatAudio(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val bytes = app?.contentResolver?.openInputStream(uri)?.readBytes() ?: return@launch
+                val uploadedUrl = repository.uploadAudio(bytes)
+                if (uploadedUrl != null) {
+                    repository.addChatMessage(
+                        sender = currentUserName.ifBlank { "Você" },
+                        text = "",
+                        isReceived = false,
+                        audioUrl = uploadedUrl
+                    )
+                }
+            } catch (_: Exception) { }
         }
     }
 
     fun sendChatMessage(text: String) {
         if (text.isBlank()) return
         viewModelScope.launch {
-            // Save user message
             repository.addChatMessage(
-                sender = "Você",
+                sender = currentUserName.ifBlank { "Voc\u00EA" },
                 text = text,
                 imageUrl = null,
                 isReceived = false
             )
+        }
+    }
 
-            // Simulate "Meu Bem" response delay
-            delay(1500)
+    fun sendTyping(isTyping: Boolean) {
+        viewModelScope.launch {
+            repository.sendTypingStatus(currentUserName, isTyping)
+        }
+    }
 
-            // Pick a beautiful romantic phrase
-            val autoReplies = listOf(
-                "Você é o meu porto seguro, amor! ❤️",
-                "Não vejo a hora de te ver de novo... ✨",
-                "Que lindo ler isso! Você faz meus dias brilharem como o ciano estelar. 🌌",
-                "Sempre guardo cada lembrança sua no meu coração.",
-                "Que tal planejarmos nosso próximo jantar especial? 🍽️",
-                "O céu hoje está lindo, mas não chega aos pés do seu sorriso. 🥰",
-                "Amo colecionar memórias com você a cada segundo."
-            )
-            val replyText = autoReplies[Random.nextInt(autoReplies.size)]
+    fun updateMusicConfig(spotifyUrl: String?, customAudioUrl: String?, customAudioName: String?) {
+        viewModelScope.launch {
+            repository.updateMusicConfig(spotifyUrl, customAudioUrl, customAudioName)
+        }
+    }
 
-            repository.addChatMessage(
-                sender = "Meu Bem",
-                text = replyText,
-                imageUrl = null,
-                isReceived = true
-            )
+    fun uploadAndAddNote(text: String, imageUri: android.net.Uri?) {
+        viewModelScope.launch {
+            val imageUrl = if (imageUri != null && app != null) {
+                val bytes = app.contentResolver.openInputStream(imageUri)?.readBytes()
+                if (bytes != null) repository.uploadImage(bytes) else null
+            } else null
+            repository.addDiaryNote(text, imageUrl)
         }
     }
 }

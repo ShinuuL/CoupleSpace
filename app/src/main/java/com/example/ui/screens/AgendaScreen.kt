@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -127,22 +126,41 @@ fun AgendaScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        // Month Header
+                        // Dynamic Month Header
+                        val months = listOf("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
+                        val cal = remember { java.util.Calendar.getInstance() }
+                        var currentYear by remember { mutableStateOf(cal.get(java.util.Calendar.YEAR)) }
+                        var currentMonth by remember { mutableStateOf(cal.get(java.util.Calendar.MONTH)) }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = {}) {
+                            IconButton(onClick = {
+                                if (currentMonth == 0) {
+                                    currentMonth = 11
+                                    currentYear--
+                                } else {
+                                    currentMonth--
+                                }
+                            }) {
                                 Icon(Icons.Outlined.ChevronLeft, contentDescription = "Anterior", tint = Color(0xFFCABEFF))
                             }
                             Text(
-                                "Novembro 2024",
+                                "${months[currentMonth]} $currentYear",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = Color(0xFFCABEFF),
                                 fontWeight = FontWeight.SemiBold
                             )
-                            IconButton(onClick = {}) {
+                            IconButton(onClick = {
+                                if (currentMonth == 11) {
+                                    currentMonth = 0
+                                    currentYear++
+                                } else {
+                                    currentMonth++
+                                }
+                            }) {
                                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Próximo", tint = Color(0xFFCABEFF))
                             }
                         }
@@ -165,23 +183,66 @@ fun AgendaScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Calendar Days (November 2024 starts on Friday Nov 1st)
-                        // Empty cells for Sun-Thu: 27, 28, 29, 30 of Oct
-                        val days = listOf(
-                            "27" to false, "28" to false, "29" to false, "30" to false,
-                            "1" to true, "2" to true, "3" to true,
-                            "4" to true, "5" to true, "6" to true, "7" to true, "8" to true, "9" to true, "10" to true,
-                            "11" to true, "12" to true, "13" to true, "14" to true, "15" to true, "16" to true, "17" to true,
-                            "18" to true, "19" to true, "20" to true, "21" to true, "22" to true, "23" to true, "24" to true
-                        )
+                        // Dynamic calendar days from current month/year
+                        val gridCal = remember(currentYear, currentMonth) {
+                            java.util.Calendar.getInstance().apply {
+                                set(java.util.Calendar.YEAR, currentYear)
+                                set(java.util.Calendar.MONTH, currentMonth)
+                                set(java.util.Calendar.DAY_OF_MONTH, 1)
+                            }
+                        }
+                        val firstDayOfWeek = gridCal.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Sun
+                        val daysInMonth = gridCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+
+                        // Build previous month filler days
+                        val prevCal = remember(currentYear, currentMonth) {
+                            java.util.Calendar.getInstance().apply {
+                                set(java.util.Calendar.YEAR, currentYear)
+                                set(java.util.Calendar.MONTH, currentMonth)
+                                set(java.util.Calendar.DAY_OF_MONTH, 1)
+                                add(java.util.Calendar.MONTH, -1)
+                            }
+                        }
+                        val daysInPrevMonth = prevCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+
+                        val days = remember(currentYear, currentMonth) {
+                            buildList {
+                                // Previous month padding
+                                for (i in (daysInPrevMonth - firstDayOfWeek + 1)..daysInPrevMonth) {
+                                    add(i.toString() to false)
+                                }
+                                // Current month days
+                                for (i in 1..daysInMonth) {
+                                    add(i.toString() to true)
+                                }
+                            }
+                        }
+
+                        // Build a set of date strings that have events for quick lookup
+                        val eventDays = remember(events, currentYear, currentMonth) {
+                            val prefix = "$currentYear-${(currentMonth + 1).toString().padStart(2, '0')}-"
+                            events.filter { it.dateStr.startsWith(prefix) }
+                                .map { it.dateStr.removePrefix(prefix).toIntOrNull() }
+                                .filterNotNull()
+                                .toSet()
+                        }
 
                         // Split into rows of 7 days
                         days.chunked(7).forEach { week ->
                             Row(modifier = Modifier.fillMaxWidth()) {
                                 week.forEach { (day, isCurrentMonth) ->
-                                    val isAnniversary = day == "4" && isCurrentMonth
-                                    val isTravel = day == "15" && isCurrentMonth
-                                    val isDinner = day == "22" && isCurrentMonth
+                                    val dayNum = day.toIntOrNull() ?: 0
+                                    val hasEvent = isCurrentMonth && eventDays.contains(dayNum)
+                                    val eventCategory = if (hasEvent) {
+                                        val dateStr = "$currentYear-${(currentMonth + 1).toString().padStart(2, '0')}-${day.padStart(2, '0')}"
+                                        events.firstOrNull { it.dateStr == dateStr }?.category
+                                    } else null
+                                    val eventColor = when (eventCategory) {
+                                        "anniversary" -> Color(0xFF00F0FF)
+                                        "travel" -> Color(0xFFCABEFF)
+                                        "dinner" -> Color(0xFFFFCBE6)
+                                        else -> Color(0xFF00F0FF)
+                                    }
 
                                     Box(
                                         modifier = Modifier
@@ -190,26 +251,17 @@ fun AgendaScreen(
                                             .padding(4.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(
-                                                when {
-                                                    isAnniversary -> Color(0xFF00F0FF).copy(alpha = 0.15f)
-                                                    isTravel -> Color(0xFFCABEFF).copy(alpha = 0.15f)
-                                                    isDinner -> Color(0xFFFFCBE6).copy(alpha = 0.15f)
-                                                    else -> Color.Transparent
-                                                }
+                                                if (hasEvent) eventColor.copy(alpha = 0.15f)
+                                                else Color.Transparent
                                             )
                                             .border(
-                                                width = if (isAnniversary || isTravel || isDinner) 1.dp else 0.dp,
-                                                color = when {
-                                                    isAnniversary -> Color(0xFF00F0FF)
-                                                    isTravel -> Color(0xFFCABEFF)
-                                                    isDinner -> Color(0xFFFFCBE6)
-                                                    else -> Color.Transparent
-                                                },
+                                                width = if (hasEvent) 1.dp else 0.dp,
+                                                color = if (hasEvent) eventColor else Color.Transparent,
                                                 shape = RoundedCornerShape(8.dp)
                                             )
                                             .clickable {
                                                 if (isCurrentMonth) {
-                                                    selectedDayDetail = "2024-11-" + day.padStart(2, '0')
+                                                    selectedDayDetail = "$currentYear-${(currentMonth + 1).toString().padStart(2, '0')}-${day.padStart(2, '0')}"
                                                 }
                                             },
                                         contentAlignment = Alignment.Center
@@ -220,21 +272,11 @@ fun AgendaScreen(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = when {
                                                     !isCurrentMonth -> Color(0xFF3B494B)
-                                                    isAnniversary -> Color(0xFF00F0FF)
-                                                    isTravel -> Color(0xFFCABEFF)
-                                                    isDinner -> Color(0xFFFFCBE6)
+                                                    hasEvent -> eventColor
                                                     else -> Color.White
                                                 },
-                                                fontWeight = if (isAnniversary || isTravel || isDinner) FontWeight.Bold else FontWeight.Normal
+                                                fontWeight = if (hasEvent) FontWeight.Bold else FontWeight.Normal
                                             )
-                                            if (isAnniversary) {
-                                                Icon(
-                                                    Icons.Default.Favorite,
-                                                    contentDescription = "Love",
-                                                    tint = Color.Red,
-                                                    modifier = Modifier.size(8.dp)
-                                                )
-                                            }
                                         }
                                     }
                                 }
@@ -396,25 +438,45 @@ fun AgendaScreen(
                             modifier = Modifier.padding(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            AsyncImage(
-                                model = "https://lh3.googleusercontent.com/aida-public/AB6AXuBjTKzfwv-1OF9X9LXnS5tSMn3cDd6L8HGJSsQQar3PCV4NHJNNooMpgJFEJi3kl3qWdRgp2aXGFttF9i4HR58-IlJf_FrOmSz9LJZl4c1lN6P0VHJfXhVj93TwH-1JJex1fpi1il1mEJy3LqkWlZX8aOhVpMhTzCUZu9p4IF0Jmc0mUbFH8FkWEBbGFhYyalAt7G_zBTmT-h0Q4FKys-GyeOUv5tTp7rKZ9a5TLm9wUVJjC-VLcVE_aw",
-                                contentDescription = "Couple photo",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(160.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
-                                contentScale = ContentScale.Crop
-                            )
+                            val config by viewModel.spaceConfig.collectAsState()
+                            val firstPhotoUrl = config?.firstPhotoUrl?.takeIf { it.isNotBlank() }
+                            if (firstPhotoUrl != null) {
+                                AsyncImage(
+                                    model = firstPhotoUrl,
+                                    contentDescription = "Couple photo",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(160.dp)
+                                        .clip(RoundedCornerShape(2.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = config?.firstPhotoCaption ?: "Nossa primeira foto...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFF2D303D),
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(160.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color(0xFF272936)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Collections, contentDescription = null, tint = Color(0xFFB9CACB).copy(0.5f), modifier = Modifier.size(48.dp))
+                                }
+                                Text(
+                                    text = "Suas memórias aparecerão aqui",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFFB9CACB).copy(0.5f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "Nossa primeira foto...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFF2D303D),
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                        }
                     }
 
                     // Romantic Quote
@@ -444,6 +506,7 @@ fun AgendaScreen(
                         )
                     }
                 }
+            }
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -454,7 +517,7 @@ fun AgendaScreen(
     if (showAddEventDialog) {
         var eventTitle by remember { mutableStateOf("") }
         var eventDesc by remember { mutableStateOf("") }
-        var eventDateStr by remember { mutableStateOf("2024-11-04") }
+        var eventDateStr by remember { mutableStateOf(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())) }
         var eventCategory by remember { mutableStateOf("anniversary") }
 
         AlertDialog(

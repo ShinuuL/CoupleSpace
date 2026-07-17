@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "jose": "npm:jose@5"
+  },
+  "tasks": {
+    "serve": "supabase functions serve send-notification --no-verify-jwt"
+  }
+}

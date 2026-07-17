@@ -1,0 +1,6 @@
+{
+  "name": "CoupleSpace",
+  "description": "Um diário estelar afetivo e privado para casais compartilharem memórias, sentimentos e mensagens sob o mesmo céu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
